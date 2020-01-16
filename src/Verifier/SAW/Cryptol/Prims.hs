@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts #-}
 
@@ -16,6 +17,10 @@ module Verifier.SAW.Cryptol.Prims
 , sbvPrims
 , w4Prims
 ) where
+
+#if !MIN_VERSION_base(4,13,0)
+import Control.Monad.Fail( MonadFail )
+#endif
 
 import Control.Monad
 import Data.Map (Map)

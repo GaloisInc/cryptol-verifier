@@ -1,4 +1,5 @@
 {-# OPTIONS_GHC -Wall #-}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE ViewPatterns #-}
@@ -14,6 +15,10 @@ Portability : non-portable (language extensions)
 -}
 
 module Verifier.SAW.Cryptol where
+
+#if !MIN_VERSION_base(4,13,0)
+import Control.Monad.Fail( MonadFail )
+#endif
 
 import Control.Monad (foldM, join, unless)
 import qualified Data.Foldable as Fold
