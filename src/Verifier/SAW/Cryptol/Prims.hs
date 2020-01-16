@@ -54,19 +54,19 @@ cryError asChar =
 bvAsChar :: Monad m => P.BitVector -> m Char
 bvAsChar w = return $ toEnum $ fromInteger $ P.unsigned $ w
 
-aigWordAsChar :: (Monad m, IsAIG l g) => g s -> AIG.BV (l s) -> m Char
+aigWordAsChar :: (MonadFail m, IsAIG l g) => g s -> AIG.BV (l s) -> m Char
 aigWordAsChar g bv =
   case AIG.asUnsigned g bv of
     Just i -> return $ toEnum $ fromInteger i
     Nothing -> fail "unable to interpret bitvector as character"
 
-sbvWordAsChar :: Monad m => SBV.SWord -> m Char
+sbvWordAsChar :: MonadFail m => SBV.SWord -> m Char
 sbvWordAsChar bv =
   case SBV.svAsInteger bv of
     Just i -> return $ toEnum $ fromInteger i
     Nothing -> fail "unable to interpret bitvector as character"
 
-w4WordAsChar :: (Monad m,W4.IsExprBuilder sym) => W4.SWord sym -> m Char
+w4WordAsChar :: (MonadFail m, W4.IsExprBuilder sym) => W4.SWord sym -> m Char
 w4WordAsChar bv =
   case W4.bvAsUnsignedInteger bv of   -- or signed?
     Just i -> return $ toEnum $ fromInteger i

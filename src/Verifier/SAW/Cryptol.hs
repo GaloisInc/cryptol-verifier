@@ -45,12 +45,12 @@ import Verifier.SAW.Prim (BitVector(..))
 import Verifier.SAW.Rewriter
 import Verifier.SAW.SharedTerm
 import Verifier.SAW.Simulator.MonadLazy (force)
-import Verifier.SAW.TypedAST (mkSort, mkModuleName, showTerm)
+import Verifier.SAW.TypedAST (mkSort, mkModuleName)
 
-unimplemented :: Monad m => String -> m a
+unimplemented :: MonadFail m => String -> m a
 unimplemented name = fail ("unimplemented: " ++ name)
 
-panic :: Monad m => String -> m a
+panic :: MonadFail m => String -> m a
 panic name = fail ("panic: " ++ name)
 
 --------------------------------------------------------------------------------
@@ -1146,7 +1146,7 @@ asCryptolTypeValue v =
           let msg = unwords ["asCryptolTypeValue: can't infer a Cryptol type"
                             ,"for a dependent SAW-Core type."
                             ]
-          let v2 = SC.runIdentity (f (error msg))
+          let v2 = SC.runId (f (error msg))
           t1 <- asCryptolTypeValue v1
           t2 <- asCryptolTypeValue v2
           return (C.tFun t1 t2)
@@ -1211,9 +1211,9 @@ exportValue ty v = case ty of
       SC.VWord w -> V.word (toInteger (width w)) (unsigned w)
       SC.VVector xs
         | TV.isTBit e -> V.VWord (toInteger (Vector.length xs)) (V.ready (V.LargeBitsVal (fromIntegral (Vector.length xs))
-                            (V.finiteSeqMap . map (V.ready . V.VBit . SC.toBool . SC.runIdentity . force) $ Fold.toList xs)))
+                            (V.finiteSeqMap . map (V.ready . V.VBit . SC.toBool . SC.runId . force) $ Fold.toList xs)))
         | otherwise   -> V.VSeq (toInteger (Vector.length xs)) $ V.finiteSeqMap $
-                            map (V.ready . exportValue e . SC.runIdentity . force) $ Vector.toList xs
+                            map (V.ready . exportValue e . SC.runId . force) $ Vector.toList xs
       _ -> error $ "exportValue (on seq type " ++ show ty ++ ")"
 
   -- infinite streams
@@ -1245,7 +1245,7 @@ exportTupleValue tys v =
     (t : ts, SC.VPair x y) -> (V.ready $ exportValue t (run x)) : exportTupleValue ts (run y)
     _                      -> error $ "exportValue: expected tuple"
   where
-    run = SC.runIdentity . force
+    run = SC.runId . force
 
 exportRecordValue :: [(C.Ident, TV.TValue)] -> SC.CValue -> [(C.Ident, V.Eval V.Value)]
 exportRecordValue fields v =
@@ -1259,7 +1259,7 @@ exportRecordValue fields v =
       zipWith (\(n,t) x -> (n, V.ready $ exportValue t (run x))) fields ths
     _                              -> error $ "exportValue: expected record"
   where
-    run = SC.runIdentity . force
+    run = SC.runId . force
 
 fvAsBool :: FirstOrderValue -> Bool
 fvAsBool (FOVBit b) = b
