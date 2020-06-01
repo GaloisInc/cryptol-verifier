@@ -495,9 +495,9 @@ importPrimitive sc (C.asPrim -> Just nm) =
     "error"         -> scGlobalDef sc "Cryptol.ecError"       -- {at,len} (fin len) => [len][8] -> at -- Run-time error
     "random"        -> scGlobalDef sc "Cryptol.ecRandom"      -- {a} => [32] -> a -- Random values
     "trace"         -> scGlobalDef sc "Cryptol.ecTrace"       -- {n,a,b} [n][8] -> a -> b -> b
-    "arrayConstant" -> scGlobalDef sc "Cryptol.ecArrayConstant" -- {a,b} b -> Array a b
-    "arrayLookup"   -> scGlobalDef sc "Cryptol.ecArrayLookup" -- {a,b} Array a b -> a -> b
-    "arrayUpdate"   -> scGlobalDef sc "Cryptol.ecArrayUpdate" -- {a,b} Array a b -> a -> b -> Array a b
+    "Array::arrayConstant" -> scGlobalDef sc "Cryptol.ecArrayConstant" -- {a,b} b -> Array a b
+    "Array::arrayLookup"   -> scGlobalDef sc "Cryptol.ecArrayLookup" -- {a,b} Array a b -> a -> b
+    "Array::arrayUpdate"   -> scGlobalDef sc "Cryptol.ecArrayUpdate" -- {a,b} Array a b -> a -> b -> Array a b
 
     _ -> panic "Unknown Cryptol primitive name" [C.unpackIdent nm]
 
