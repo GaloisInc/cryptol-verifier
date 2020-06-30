@@ -199,6 +199,8 @@ importPC sc pc =
     C.PLiteral   -> scGlobalDef sc "Cryptol.PLiteral"
     C.PAnd       -> panic "importPC PAnd" []
     C.PTrue      -> panic "importPC PTrue" []
+    C.PFLiteral  -> panic "importPC PFLiteral" []
+    C.PValidFloat -> panic "importPC PValidFloat" []
 
 -- | Translate size types to SAW values of type Num, value types to SAW types of sort 0.
 importType :: SharedContext -> Env -> C.Type -> IO Term
@@ -223,6 +225,7 @@ importType sc env ty =
             C.TCBit      -> scBoolType sc
             C.TCInteger  -> scIntegerType sc
             C.TCIntMod   -> scGlobalApply sc "Cryptol.IntModNum" =<< traverse go tyargs
+            C.TCFloat    -> panic "importType Cryptol.TCFloat not implemented" []
             C.TCArray    -> do a <- go (tyargs !! 0)
                                b <- go (tyargs !! 1)
                                scArrayType sc a b
@@ -541,7 +544,7 @@ proveProp sc env prop =
 
 importPrimitive :: SharedContext -> C.Name -> IO Term
 importPrimitive sc (C.asPrim -> Just nm) =
-  case nm of
+  case show nm of
     "True"          -> scBool sc True
     "False"         -> scBool sc False
     "number"        -> scGlobalDef sc "Cryptol.ecNumber"      -- Converts a numeric type into its corresponding value.
@@ -644,7 +647,7 @@ importPrimitive sc (C.asPrim -> Just nm) =
     "Array::arrayLookup"   -> scGlobalDef sc "Cryptol.ecArrayLookup" -- {a,b} Array a b -> a -> b
     "Array::arrayUpdate"   -> scGlobalDef sc "Cryptol.ecArrayUpdate" -- {a,b} Array a b -> a -> b -> Array a b
 
-    _ -> panic "Unknown Cryptol primitive name" [C.unpackIdent nm]
+    _ -> panic "Unknown Cryptol primitive name" [show nm]
 
 importPrimitive _ nm =
   panic "Improper Cryptol primitive name" [show nm]
@@ -1364,6 +1367,8 @@ exportValue ty v = case ty of
   TV.TVArray{} -> error $ "exportValue: (on array type " ++ show ty ++ ")"
 
   TV.TVRational -> error "exportValue: Not yet implemented: Rational"
+
+  TV.TVFloat _ _ -> panic "exportValue: Not yet implemented: Float" []
 
   TV.TVSeq _ e ->
     case v of
