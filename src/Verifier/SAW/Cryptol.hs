@@ -16,6 +16,7 @@ Portability : non-portable (language extensions)
 module Verifier.SAW.Cryptol where
 
 import Control.Monad (foldM, join, unless)
+import Data.Bifunctor ( bimap, first, second )
 import qualified Data.Foldable as Fold
 import Data.List
 import qualified Data.IntTrie as IntTrie
@@ -34,7 +35,7 @@ import Cryptol.Eval.Type (evalValType)
 import qualified Cryptol.TypeCheck.AST as C
 import qualified Cryptol.TypeCheck.Subst as C (Subst, apSubst, singleTParamSubst)
 import qualified Cryptol.ModuleSystem.Name as C (asPrim, nameIdent)
-import qualified Cryptol.Utils.Ident as C (Ident, packIdent, unpackIdent)
+import qualified Cryptol.Utils.Ident as C (Ident, PrimIdent(..), packIdent, unpackIdent, prelPrim, floatPrim)
 import qualified Cryptol.Utils.Logger as C (quietLogger)
 import Cryptol.TypeCheck.TypeOf (fastTypeOf, fastSchemaOf)
 import Cryptol.Utils.PP (pretty)
@@ -542,115 +543,136 @@ proveProp sc env prop =
 
         _ -> do panic "proveProp" [pretty prop]
 
+
 importPrimitive :: SharedContext -> C.Name -> IO Term
-importPrimitive sc (C.asPrim -> Just nm) =
-  case show nm of
-    "True"          -> scBool sc True
-    "False"         -> scBool sc False
-    "number"        -> scGlobalDef sc "Cryptol.ecNumber"      -- Converts a numeric type into its corresponding value.
-                                                              -- {val, a} (Literal val a) => a
+importPrimitive sc n
+  | Just nm <- C.asPrim n, Just term <- Map.lookup nm (prelPrims <> floatPrims) = term sc
+  | Just nm <- C.asPrim n = panic "Unknown Cryptol primitive name" [show nm]
+  | otherwise = panic "Improper Cryptol primitive name" [show n]
 
-    "fromZ"         -> scGlobalDef sc "Cryptol.ecFromZ"       -- {n} (fin n, n >= 1) => Z n -> Integer
+prelPrims :: Map C.PrimIdent (SharedContext -> IO Term)
+prelPrims = Map.fromList $ first C.prelPrim <$>
+  [
+    ("True",           \sc -> scBool sc True)
+  , ("False",          \sc -> scBool sc False)
+  ] <>
+  (second (uncurry ($) . first flip) <$>
+   [
+     ("number",       (scGlobalDef, "Cryptol.ecNumber"))      -- Converts a numeric type into its corresponding value.
+     --                                                        -- {val, a} (Literal val a) => a
 
-    -- Zero
-    "zero"          -> scGlobalDef sc "Cryptol.ecZero"        -- {a} (Zero a) => a
+   , ("fromZ",        (scGlobalDef, "Cryptol.ecFromZ"))       -- {n} (fin n, n >= 1) => Z n -> Integer
 
-    -- Logic
-    "&&"            -> scGlobalDef sc "Cryptol.ecAnd"         -- {a} (Logic a) => a -> a -> a
-    "||"            -> scGlobalDef sc "Cryptol.ecOr"          -- {a} (Logic a) => a -> a -> a
-    "^"             -> scGlobalDef sc "Cryptol.ecXor"         -- {a} (Logic a) => a -> a -> a
-    "complement"    -> scGlobalDef sc "Cryptol.ecCompl"       -- {a} (Logic a) => a -> a
+     -- -- Zero
+   , ("zero",         (scGlobalDef, "Cryptol.ecZero"))        -- {a} (Zero a) => a
 
-    -- Ring
-    "fromInteger"   -> scGlobalDef sc "Cryptol.ecFromInteger" -- {a} (Ring a) => Integer -> a
-    "+"             -> scGlobalDef sc "Cryptol.ecPlus"        -- {a} (Ring a) => a -> a -> a
-    "-"             -> scGlobalDef sc "Cryptol.ecMinus"       -- {a} (Ring a) => a -> a -> a
-    "*"             -> scGlobalDef sc "Cryptol.ecMul"         -- {a} (Ring a) => a -> a -> a
-    "negate"        -> scGlobalDef sc "Cryptol.ecNeg"         -- {a} (Ring a) => a -> a
+     -- -- Logic
+   , ("&&",           (scGlobalDef, "Cryptol.ecAnd"))         -- {a} (Logic a) => a -> a -> a
+   , ("||",           (scGlobalDef, "Cryptol.ecOr"))          -- {a} (Logic a) => a -> a -> a
+   , ("^",            (scGlobalDef, "Cryptol.ecXor"))         -- {a} (Logic a) => a -> a -> a
+   , ("complement",   (scGlobalDef, "Cryptol.ecCompl"))       -- {a} (Logic a) => a -> a
 
-    -- Integral
-    "toInteger"     -> scGlobalDef sc "Cryptol.ecToInteger"   -- {a} (Integral a) => a -> Integer
-    "/"             -> scGlobalDef sc "Cryptol.ecDiv"         -- {a} (Integral a) => a -> a -> a
-    "%"             -> scGlobalDef sc "Cryptol.ecMod"         -- {a} (Integral a) => a -> a -> a
-    "^^"            -> scGlobalDef sc "Cryptol.ecExp"         -- {a} (Ring a, Integral b) => a -> b -> a
-    "infFrom"       -> scGlobalDef sc "Cryptol.ecInfFrom"     -- {a} (Integral a) => a -> [inf]a
-    "infFromThen"   -> scGlobalDef sc "Cryptol.ecInfFromThen" -- {a} (Integral a) => a -> a -> [inf]a
+     -- -- Ring
+   , ("fromInteger",  (scGlobalDef, "Cryptol.ecFromInteger")) -- {a} (Ring a) => Integer -> a
+   , ("+",            (scGlobalDef, "Cryptol.ecPlus"))        -- {a} (Ring a) => a -> a -> a
+   , ("-",            (scGlobalDef, "Cryptol.ecMinus"))       -- {a} (Ring a) => a -> a -> a
+   , ("*",            (scGlobalDef, "Cryptol.ecMul"))         -- {a} (Ring a) => a -> a -> a
+   , ("negate",       (scGlobalDef, "Cryptol.ecNeg"))         -- {a} (Ring a) => a -> a
 
-    -- Field
-    "recip"         -> scGlobalDef sc "Cryptol.ecRecip"       -- {a} (Field a) => a -> a
-    "/."            -> scGlobalDef sc "Cryptol.ecFieldDiv"    -- {a} (Field a) => a -> a -> a
+     -- -- Integral
+   , ("toInteger",    (scGlobalDef, "Cryptol.ecToInteger"))   -- {a} (Integral a) => a -> Integer
+   , ("/",            (scGlobalDef, "Cryptol.ecDiv"))         -- {a} (Integral a) => a -> a -> a
+   , ("%",            (scGlobalDef, "Cryptol.ecMod"))         -- {a} (Integral a) => a -> a -> a
+   , ("^^",           (scGlobalDef, "Cryptol.ecExp"))         -- {a} (Ring a, Integral b) => a -> b -> a
+   , ("infFrom",      (scGlobalDef, "Cryptol.ecInfFrom"))     -- {a} (Integral a) => a -> [inf]a
+   , ("infFromThen",  (scGlobalDef, "Cryptol.ecInfFromThen")) -- {a} (Integral a) => a -> a -> [inf]a
 
-    -- Round
-    "ceiling"       -> scGlobalDef sc "Cryptol.ecCeiling"     -- {a} (Round a) => a -> Integer
-    "floor"         -> scGlobalDef sc "Cryptol.ecFloor"       -- {a} (Round a) => a -> Integer
-    "trunc"         -> scGlobalDef sc "Cryptol.ecTruncate"    -- {a} (Round a) => a -> Integer
-    "roundAway"     -> scGlobalDef sc "Cryptol.ecRoundAway"   -- {a} (Round a) => a -> Integer
-    "roundToEven"   -> scGlobalDef sc "Cryptol.ecRoundToEven" -- {a} (Round a) => a -> Integer
+     -- -- Field
+   , ("recip",        (scGlobalDef, "Cryptol.ecRecip"))       -- {a} (Field a) => a -> a
+   , ("/.",           (scGlobalDef, "Cryptol.ecFieldDiv"))    -- {a} (Field a) => a -> a -> a
 
-    -- Eq
-    "=="            -> scGlobalDef sc "Cryptol.ecEq"          -- {a} (Eq a) => a -> a -> Bit
-    "!="            -> scGlobalDef sc "Cryptol.ecNotEq"       -- {a} (Eq a) => a -> a -> Bit
+     -- -- Round
+   , ("ceiling",      (scGlobalDef, "Cryptol.ecCeiling"))     -- {a} (Round a) => a -> Integer
+   , ("floor",        (scGlobalDef, "Cryptol.ecFloor"))       -- {a} (Round a) => a -> Integer
+   , ("trunc",        (scGlobalDef, "Cryptol.ecTruncate"))    -- {a} (Round a) => a -> Integer
+   , ("roundAway",    (scGlobalDef, "Cryptol.ecRoundAway"))   -- {a} (Round a) => a -> Integer
+   , ("roundToEven",  (scGlobalDef, "Cryptol.ecRoundToEven")) -- {a} (Round a) => a -> Integer
 
-    -- Cmp
-    "<"             -> scGlobalDef sc "Cryptol.ecLt"          -- {a} (Cmp a) => a -> a -> Bit
-    ">"             -> scGlobalDef sc "Cryptol.ecGt"          -- {a} (Cmp a) => a -> a -> Bit
-    "<="            -> scGlobalDef sc "Cryptol.ecLtEq"        -- {a} (Cmp a) => a -> a -> Bit
-    ">="            -> scGlobalDef sc "Cryptol.ecGtEq"        -- {a} (Cmp a) => a -> a -> Bit
+     -- -- Eq
+   , ("==",           (scGlobalDef, "Cryptol.ecEq"))          -- {a} (Eq a) => a -> a -> Bit
+   , ("!=",           (scGlobalDef, "Cryptol.ecNotEq"))       -- {a} (Eq a) => a -> a -> Bit
 
-    -- SignedCmp
-    "<$"            -> scGlobalDef sc "Cryptol.ecSLt"         -- {a} (SignedCmp a) => a -> a -> Bit
+     -- -- Cmp
+   , ("<",            (scGlobalDef, "Cryptol.ecLt"))          -- {a} (Cmp a) => a -> a -> Bit
+   , (">",            (scGlobalDef, "Cryptol.ecGt"))          -- {a} (Cmp a) => a -> a -> Bit
+   , ("<=",           (scGlobalDef, "Cryptol.ecLtEq"))        -- {a} (Cmp a) => a -> a -> Bit
+   , (">=",           (scGlobalDef, "Cryptol.ecGtEq"))        -- {a} (Cmp a) => a -> a -> Bit
 
-    -- Bitvector primitives
-    "/$"            -> scGlobalDef sc "Cryptol.ecSDiv"        -- {n} (fin n, n>=1) => [n] -> [n] -> [n]
-    "%$"            -> scGlobalDef sc "Cryptol.ecSMod"        -- {n} (fin n, n>=1) => [n] -> [n] -> [n]
-    "lg2"           -> scGlobalDef sc "Cryptol.ecLg2"         -- {n} (fin n) => [n] -> [n]
-    ">>$"           -> scGlobalDef sc "Cryptol.ecSShiftR"     -- {n, ix} (fin n, n >= 1, Integral ix) => [n] -> ix -> [n]
+     -- -- SignedCmp
+   , ("<$",           (scGlobalDef, "Cryptol.ecSLt"))         -- {a} (SignedCmp a) => a -> a -> Bit
 
-    -- Rational primitives
-    "ratio"         -> scGlobalDef sc "Cryptol.ecRatio"       -- Integer -> Integer -> Rational
+     -- -- Bitvector primitives
+   , ("/$",           (scGlobalDef, "Cryptol.ecSDiv"))        -- {n} (fin n, n>=1) => [n] -> [n] -> [n]
+   , ("%$",           (scGlobalDef, "Cryptol.ecSMod"))        -- {n} (fin n, n>=1) => [n] -> [n] -> [n]
+   , ("lg2",          (scGlobalDef, "Cryptol.ecLg2"))         -- {n} (fin n) => [n] -> [n]
+   , (">>$",          (scGlobalDef, "Cryptol.ecSShiftR"))     -- {n, ix} (fin n, n >= 1, Integral ix) => [n] -> ix -> [n]
 
-    -- Shifts/rotates
-    "<<"            -> scGlobalDef sc "Cryptol.ecShiftL"      -- {n, ix, a} (Integral ix, Zero a) => [n]a -> ix -> [n]a
-    ">>"            -> scGlobalDef sc "Cryptol.ecShiftR"      -- {n, ix, a} (Integral ix, Zero a) => [n]a -> ix -> [n]a
-    "<<<"           -> scGlobalDef sc "Cryptol.ecRotL"        -- {n, ix, a} (fin n, Integral ix) => [n]a -> ix -> [n]a
-    ">>>"           -> scGlobalDef sc "Cryptol.ecRotR"        -- {n, ix, a} (fin n, Integral ix) => [n]a -> ix -> [n]a
+     -- -- Rational primitives
+   , ("ratio",        (scGlobalDef, "Cryptol.ecRatio"))       -- Integer -> Integer -> Rational
 
-    -- Sequences primitives
-    "#"             -> scGlobalDef sc "Cryptol.ecCat"         -- {a,b,d} (fin a) => [a] d -> [b] d -> [a + b] d
-    "splitAt"       -> scGlobalDef sc "Cryptol.ecSplitAt"     -- {a,b,c} (fin a) => [a+b] c -> ([a]c,[b]c)
-    "join"          -> scGlobalDef sc "Cryptol.ecJoin"        -- {a,b,c} (fin b) => [a][b]c -> [a * b]c
-    "split"         -> scGlobalDef sc "Cryptol.ecSplit"       -- {a,b,c} (fin b) => [a * b] c -> [a][b] c
-    "reverse"       -> scGlobalDef sc "Cryptol.ecReverse"     -- {a,b} (fin a) => [a] b -> [a] b
-    "transpose"     -> scGlobalDef sc "Cryptol.ecTranspose"   -- {a,b,c} [a][b]c -> [b][a]c
-    "@"             -> scGlobalDef sc "Cryptol.ecAt"          -- {n, a, ix} (Integral ix) => [n]a -> ix -> a
-    "!"             -> scGlobalDef sc "Cryptol.ecAtBack"      -- {n, a, ix} (fin n, Integral ix) => [n]a -> ix -> a
-    "update"        -> scGlobalDef sc "Cryptol.ecUpdate"      -- {n, a, ix} (Integral ix) => [n]a -> ix -> a -> [n]a
-    "updateEnd"     -> scGlobalDef sc "Cryptol.ecUpdateEnd"   -- {n, a, ix} (fin n, Integral ix) => [n]a -> ix -> a -> [n]a
+     -- -- Shifts/rotates
+   , ("<<",           (scGlobalDef, "Cryptol.ecShiftL"))      -- {n, ix, a} (Integral ix, Zero a) => [n]a -> ix -> [n]a
+   , (">>",           (scGlobalDef, "Cryptol.ecShiftR"))      -- {n, ix, a} (Integral ix, Zero a) => [n]a -> ix -> [n]a
+   , ("<<<",          (scGlobalDef, "Cryptol.ecRotL"))        -- {n, ix, a} (fin n, Integral ix) => [n]a -> ix -> [n]a
+   , (">>>",          (scGlobalDef, "Cryptol.ecRotR"))        -- {n, ix, a} (fin n, Integral ix) => [n]a -> ix -> [n]a
 
-    -- Enumerations
-    "fromTo"        -> scGlobalDef sc "Cryptol.ecFromTo"
-                               -- fromTo : {first, last, bits, a}
-                               --           ( fin last, fin bits, last >== first,
-                               --             Literal first a, Literal last a)
-                               --        => [1 + (last - first)]a
-    "fromThenTo"    -> scGlobalDef sc "Cryptol.ecFromThenTo"
-                               -- fromThenTo : {first, next, last, a, len}
-                               --              ( fin first, fin next, fin last
-                               --              , Literal first a, Literal next a, Literal last a
-                               --              , first != next
-                               --              , lengthFromThenTo first next last == len) => [len]a
+     -- -- Sequences primitives
+   , ("#",            (scGlobalDef, "Cryptol.ecCat"))         -- {a,b,d} (fin a) => [a] d -> [b] d -> [a + b] d
+   , ("splitAt",      (scGlobalDef, "Cryptol.ecSplitAt"))     -- {a,b,c} (fin a) => [a+b] c -> ([a]c,[b]c)
+   , ("join",         (scGlobalDef, "Cryptol.ecJoin"))        -- {a,b,c} (fin b) => [a][b]c -> [a * b]c
+   , ("split",        (scGlobalDef, "Cryptol.ecSplit"))       -- {a,b,c} (fin b) => [a * b] c -> [a][b] c
+   , ("reverse",      (scGlobalDef, "Cryptol.ecReverse"))     -- {a,b} (fin a) => [a] b -> [a] b
+   , ("transpose",    (scGlobalDef, "Cryptol.ecTranspose"))   -- {a,b,c} [a][b]c -> [b][a]c
+   , ("@",            (scGlobalDef, "Cryptol.ecAt"))          -- {n, a, ix} (Integral ix) => [n]a -> ix -> a
+   , ("!",            (scGlobalDef, "Cryptol.ecAtBack"))      -- {n, a, ix} (fin n, Integral ix) => [n]a -> ix -> a
+   , ("update",       (scGlobalDef, "Cryptol.ecUpdate"))      -- {n, a, ix} (Integral ix) => [n]a -> ix -> a -> [n]a
+   , ("updateEnd",    (scGlobalDef, "Cryptol.ecUpdateEnd"))   -- {n, a, ix} (fin n, Integral ix) => [n]a -> ix -> a -> [n]a
 
-    "error"         -> scGlobalDef sc "Cryptol.ecError"       -- {at,len} (fin len) => [len][8] -> at -- Run-time error
-    "random"        -> scGlobalDef sc "Cryptol.ecRandom"      -- {a} => [32] -> a -- Random values
-    "trace"         -> scGlobalDef sc "Cryptol.ecTrace"       -- {n,a,b} [n][8] -> a -> b -> b
-    "Array::arrayConstant" -> scGlobalDef sc "Cryptol.ecArrayConstant" -- {a,b} b -> Array a b
-    "Array::arrayLookup"   -> scGlobalDef sc "Cryptol.ecArrayLookup" -- {a,b} Array a b -> a -> b
-    "Array::arrayUpdate"   -> scGlobalDef sc "Cryptol.ecArrayUpdate" -- {a,b} Array a b -> a -> b -> Array a b
+     -- -- Enumerations
+   , ("fromTo",       (scGlobalDef, "Cryptol.ecFromTo"))
+     --                            -- fromTo : {first, last, bits, a}
+     --                            --           ( fin last, fin bits, last >== first,
+     --                            --             Literal first a, Literal last a)
+     --                            --        => [1 + (last - first)]a
+   , ("fromThenTo",   (scGlobalDef, "Cryptol.ecFromThenTo"))
+     --                            -- fromThenTo : {first, next, last, a, len}
+     --                            --              ( fin first, fin next, fin last
+     --                            --              , Literal first a, Literal next a, Literal last a
+     --                            --              , first != next
+     --                            --              , lengthFromThenTo first next last == len) => [len]a
 
-    _ -> panic "Unknown Cryptol primitive name" [show nm]
+   , ("error",        (scGlobalDef, "Cryptol.ecError"))       -- {at,len} (fin len) => [len][8] -> at -- Run-time error
+   , ("random",       (scGlobalDef, "Cryptol.ecRandom"))      -- {a} => [32] -> a -- Random values
+   , ("trace",        (scGlobalDef, "Cryptol.ecTrace"))       -- {n,a,b} [n][8] -> a -> b -> b
+   , ("Array::arrayConstant",(scGlobalDef, "Cryptol.ecArrayConstant")) -- {a,b} b -> Array a b
+   , ("Array::arrayLookup",  (scGlobalDef, "Cryptol.ecArrayLookup")) -- {a,b} Array a b -> a -> b
+   , ("Array::arrayUpdate",  (scGlobalDef, "Cryptol.ecArrayUpdate")) -- {a,b} Array a b -> a -> b -> Array a b
+   ])
 
-importPrimitive _ nm =
-  panic "Improper Cryptol primitive name" [show nm]
+floatPrims :: Map C.PrimIdent (SharedContext -> IO Term)
+floatPrims = Map.fromList $ bimap C.floatPrim (uncurry ($) . first flip) <$>
+  let notimpl = \_ -> \n -> panic "No implementation for Cryptol float primitive" [n] in
+  [
+    ("fpNaN",      (notimpl, "Cryptol.fpNaN"))
+  , ("fpPosInf",   (notimpl, "Cryptol.fpPosInf"))
+  , ("fpFromBits", (notimpl, "Cryptol.fpFromBits"))
+  , ("fpToBits",   (notimpl, "Cryptol.fpToBits"))
+  , ("=.=",        (notimpl, "Cryptol.=.="))
+  , ("fpAdd",      (notimpl, "Cryptol.fpAdd"))
+  , ("fpSub",      (notimpl, "Cryptol.fpSub"))
+  , ("fpMul",      (notimpl, "Cryptol.fpMul"))
+  , ("fpDiv",      (notimpl, "Cryptol.fpDiv"))
+  ]
 
 
 -- | Convert a Cryptol expression to a SAW-Core term. Calling
